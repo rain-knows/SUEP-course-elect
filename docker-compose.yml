@@ -1,0 +1,21 @@
+version: "3"
+services:
+  easyconnect:
+    image: hagb/docker-easyconnect:cli
+    container_name: easyconnect
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - EC_VER=7.6.3
+      - CLI_OPTS="-d vpn.shiep.edu.cn -u username -p password"
+
+  suep-course-elect:
+    build: ./
+    container_name: suep-course-elect
+    links:
+      - easyconnect
+    environment:
+      - HTTP_PROXY=http://easyconnect:8888
+      - HTTPS_PROXY=http://easyconnect:8888

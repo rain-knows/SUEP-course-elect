@@ -64,16 +64,31 @@ def elect_course(course_id: str, election_id: str) -> list:
             'optype': 'true',
             'operator0': f'{course_id}:true:0'
         })
+
+    if '会话已经被过期' in resp.text:
+        ids.login(username, password, service)
+        return [course_id, '会话已经被过期', False, True]
+
     if resp.status_code != 200:
         if str(resp.status_code).startswith('4'):
             raise Exception('Failed to elect course.', resp.status_code)
         else:
-            return [course_id, resp.status_code, False, True]
+            return [course_id, str(resp.status_code), False, True]
+
     e = etree.HTML(resp.text)
     msgs = e.xpath('//table/tr[1]/td/div/text()')
     msg = msgs[0].strip() if len(msgs) > 0 else resp.text
-    failed_words = ['上限', '已满', '已达', '已经达到']
-    error_words = ['失败', '错误', 'fail', 'error', '503'] + failed_words
+    simplified_msgs = [
+        '请不要过快点击',
+        '服务器内部错误',
+    ]
+    for simplified_msg in simplified_msgs:
+        if simplified_msg in msg:
+            msg = simplified_msg
+    if '已经选过' in msg:
+        return [course_id, msg, True, False]
+    failed_words = ['上限', '已满', '已达', '已经达到', '冲突']
+    error_words = ['失败', '错误', 'fail', 'error', '503', '过快点击'] + failed_words
     succeeded = not any(i in msg for i in error_words)
     retry = not (any(i in msg for i in failed_words) or succeeded)
     return [course_id, msg, succeeded, retry]
@@ -113,6 +128,7 @@ if __name__ == '__main__':
         ids = IdsAuth(cookies)
 
     if not ids.ok:
+        print('Logging in by username and password...')
         ids.login(username, password, service)
 
     if ids.ok:

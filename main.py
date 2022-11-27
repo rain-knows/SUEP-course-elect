@@ -7,7 +7,7 @@ from lxml import etree
 from time import sleep
 from ids import IdsAuth
 from envconfig import username, password
-from envconfig import skip_course_list, sheet_format
+from envconfig import skip_course_list, check_course_availability, sheet_format
 from envconfig import default_election_id, default_courses_exps
 from envconfig import interval, threads_interval
 
@@ -18,11 +18,12 @@ headers = {
     'Chrome/106.0.0.0 Safari/537.36',
 }
 
+host = 'https://jw.shiep.edu.cn'
+
 
 def get_elections() -> dict:
     '''Find all available election profile {names:ids}'''
-    resp = ids.get('https://jw.shiep.edu.cn/eams/stdElectCourse.action',
-                   headers=headers)
+    resp = ids.get(f'{host}/eams/stdElectCourse.action', headers=headers)
     if resp.status_code != 200:
         raise Exception('Failed to get election profile ids.')
     e = etree.HTML(resp.text)
@@ -41,7 +42,7 @@ def get_elections() -> dict:
 
 def get_courses(election_id: str) -> list:
     '''Get the course list'''
-    resp = ids.get('https://jw.shiep.edu.cn/eams/stdElectCourse!data.action',
+    resp = ids.get(f'{host}/eams/stdElectCourse!data.action',
                    params={'profileId': election_id},
                    headers=headers)
     if resp.status_code != 200:
@@ -51,19 +52,48 @@ def get_courses(election_id: str) -> list:
     return json.loads(_jsonnet.evaluate_snippet('snippet', data))
 
 
+def get_semester_info(election_id: str) -> dict:
+    '''Get semester info'''
+    resp = ids.get(f'{host}/eams/stdElectCourse!defaultPage.action',
+                   params={'electionProfile.id': election_id},
+                   headers=headers)
+    if resp.status_code != 200:
+        raise Exception('Failed to get semester info.')
+    e = etree.HTML(resp.text)
+    qr_script_url = e.xpath('//*[@id="qr_script"]/@src')
+    if len(qr_script_url) == 0:
+        raise Exception('Failed to get semester info.')
+    params = {
+        i.split('=')[0]: i.split('=')[1]
+        for i in qr_script_url[0].split('?')[-1].split('&')
+    }
+    return params
+
+
+def get_courses_status(params: dict) -> dict:
+    '''Get courses status'''
+    resp = ids.get(f'{host}/eams/stdElectCourse!queryStdCount.action',
+                   params=params,
+                   headers=headers)
+    if resp.status_code != 200:
+        raise Exception('Failed to get course status.')
+    data = resp.text  # format: javascript code
+    data = data[data.find('{'):data.rfind('}') + 1]  # js object
+    return json.loads(_jsonnet.evaluate_snippet('snippet', data))
+
+
 def elect_course(course_id: str, election_id: str) -> list:
     '''Elect a course
     return: [course_id, message, succeeded?, retry?]
     '''
     headers['X-Requested-With'] = 'XMLHttpRequest'
-    resp = ids.post(
-        'https://jw.shiep.edu.cn/eams/stdElectCourse!batchOperator.action',
-        params={'profileId': election_id},
-        headers=headers,
-        data={
-            'optype': 'true',
-            'operator0': f'{course_id}:true:0'
-        })
+    resp = ids.post(f'{host}/eams/stdElectCourse!batchOperator.action',
+                    params={'profileId': election_id},
+                    headers=headers,
+                    data={
+                        'optype': 'true',
+                        'operator0': f'{course_id}:true:0'
+                    })
 
     if '会话已经被过期' in resp.text:
         ids.login(username, password, service)
@@ -156,12 +186,23 @@ if __name__ == '__main__':
             election_id = input('Please select an election id: ')
     print(f'Selected {election_id}.')
 
-    ids.get('https://jw.shiep.edu.cn/eams/stdElectCourse!defaultPage.action',
+    if not check_course_availability:
+        ids.get(
+            'https://jw.shiep.edu.cn/eams/stdElectCourse!defaultPage.action',
             params={'electionProfile.id': election_id},
             headers=headers)  # Do not remove this
 
     if not skip_course_list:
         data = get_courses(election_id)
+
+        if check_course_availability:
+            params = get_semester_info(election_id)
+            courses_status = get_courses_status(params)
+            for course in data:
+                course['available'] = (courses_status[str(course['id'])]['sc']
+                                       < courses_status[str(
+                                           course['id'])]['lc'])
+
         if sheet_format == 'tsv':
             df = pd.DataFrame(data)
             filename = f'{election_id}.tsv'
@@ -173,14 +214,23 @@ if __name__ == '__main__':
         else:
             filename = ''
 
+        if check_course_availability:
+            data.sort(key=lambda x: (not x['available'], x['id']))
+        else:
+            data.sort(key=lambda x: x['id'])
+
         print(f'Please checkout full information on website' +
               '.' if filename == '' else f' or in {filename}.')
-        print('Available courses: ')
-        print('  ID: ' + '\t'.join(['No.', 'Name', 'Teachers']))
+        print('Courses: ')
+        column_names = ['ID:', 'No.', 'Name', 'Teachers']
+        column_keys = ['id', 'no', 'name', 'teachers']
+        if check_course_availability:
+            column_names.append('Available')
+            column_keys.append('available')
+
+        print('  ' + '\t'.join(column_names))
         for course in data:
-            print(
-                f'  {course["id"]}: ' +
-                '\t'.join([course['no'], course['name'], course['teachers']]))
+            print('  ' + '\t'.join([str(course[key]) for key in column_keys]))
 
     if len(default_courses_exps) == 0:
         print('Please input the courses expressions you want to elect, '

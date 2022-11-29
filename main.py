@@ -186,9 +186,7 @@ if __name__ == '__main__':
             election_id = input('Please select an election id: ')
     print(f'Selected {election_id}.')
 
-    if not check_course_availability:
-        ids.get(
-            'https://jw.shiep.edu.cn/eams/stdElectCourse!defaultPage.action',
+    ids.get('https://jw.shiep.edu.cn/eams/stdElectCourse!defaultPage.action',
             params={'electionProfile.id': election_id},
             headers=headers)  # Do not remove this
 

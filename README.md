@@ -24,17 +24,16 @@ docker run -it suep-course-elect
 
 ## Configuration
 
-| Variable                 | Description                                                                |
-| ------------------------ | -------------------------------------------------------------------------- |
-| username                 | 8-digit student ID in string                                               |
-| password                 | password at [IDS](https://ids.shiep.edu.cn)                                |
-| skip_course_list         | Skip checking courses list                                                 |
+| Variable                  | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| username                  | 8-digit student ID in string                                               |
+| password                  | password at [IDS](https://ids.shiep.edu.cn)                                |
+| skip_course_list          | Skip checking courses list                                                 |
 | check_course_availability | Check course availability when listing courses                             |
-| sheet_format             | The format of the exported sheet (`tsv` or `xlsx`, leave blank to disable) |
-| default_election_id      | The default election ID                                                    |
-| default_courses_exps     | The default courses expressions                                            |
-| interval                 | The interval between two requests (in seconds)                             |
-| threads_interval         | The interval between two threads (in seconds)                              |
+| sheet_format              | The format of the exported sheet (`tsv` or `xlsx`, leave blank to disable) |
+| default_courses_exps      | The default courses expressions                                            |
+| interval                  | The interval between two requests (in seconds)                             |
+| threads_interval          | The interval between two threads (in seconds)                              |
 
 ## About courses expressions
 
@@ -43,14 +42,20 @@ Each course expression creates a thread. A course expression consists of course 
 Here is an example:
 
 ```python
-courses_exps = [
-    '114&&514;810',
-    '0721||1919',
-]
+courses_exps = {
+    'election_id_1': [
+        '114&&514;810',
+        '0721||1919',
+    ],
+    'election_id_2': [
+        '1851;2588',
+    ],
+}
 ```
 
 - Thread 1 will select 114 first, and then select 514 if 114 is selected successfully. Regardless of the previous results, select 810 at the end.
 - Thread 2 will select 0721 first, if 0721 is failed to select, then select 1919. (If 0721 is selected successfully, then 1919 will not start.)
+- After election_id_1 is finished, election_id_2 will start.
 
 ## About connecting to the course selection platform
 

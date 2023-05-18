@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "suep-course-elect"
+version = "0.1.1"
+description = "An automation script for SUEP course selection."
+authors = []
+license = "GPL3"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.30.0"
+pandas = "^2.0.1"
+lxml = "^4.9.2"
+jsonnet = "^0.20.0"
+openpyxl = "^3.1.2"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.3.0"
+flake8 = "^6.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

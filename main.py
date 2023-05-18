@@ -8,7 +8,7 @@ from time import sleep
 from ids import IdsAuth
 from envconfig import username, password
 from envconfig import skip_course_list, check_course_availability, sheet_format
-from envconfig import default_election_id, default_courses_exps
+from envconfig import default_courses_exps
 from envconfig import interval, threads_interval
 
 headers = {
@@ -19,11 +19,13 @@ headers = {
 }
 
 host = 'https://jw.shiep.edu.cn'
+service = 'http://jw.shiep.edu.cn/eams/login.action'
 
 
-def get_elections() -> dict:
+def get_elections() -> dict[str, str]:
     '''Find all available election profile {names:ids}'''
-    resp = ids.get(f'{host}/eams/stdElectCourse.action', headers=headers)
+    resp = ids.get(f'{host}/eams/stdElectCourse!innerIndex.action?projectId=1',
+                   headers=headers)
     if resp.status_code != 200:
         raise Exception('Failed to get election profile ids.')
     e = etree.HTML(resp.text)
@@ -36,26 +38,27 @@ def get_elections() -> dict:
         for i in election_urls
     ]
     if len(election_names) != len(election_ids):
-        raise Exception('Election names and ids do not match.')
+        raise Exception('Election names and ids do not match: '
+                        f'{election_names} != {election_ids}')
     return dict(zip(election_names, election_ids))
 
 
-def get_courses(election_id: str) -> list:
+def get_courses(e_id: str) -> list[dict]:
     '''Get the course list'''
     resp = ids.get(f'{host}/eams/stdElectCourse!data.action',
-                   params={'profileId': election_id},
+                   params={'profileId': e_id},
                    headers=headers)
     if resp.status_code != 200:
         raise Exception('Failed to get course list.')
-    data = resp.text  # format: javascript code
-    data = data[data.find('['):data.rfind(']') + 1]  # js object
-    return json.loads(_jsonnet.evaluate_snippet('snippet', data))
+    dat = resp.text  # format: javascript code
+    dat = dat[dat.find('['):dat.rfind(']') + 1]  # js object
+    return json.loads(_jsonnet.evaluate_snippet('snippet', dat))
 
 
-def get_semester_info(election_id: str) -> dict:
+def get_semester_info(e_id: str) -> dict:
     '''Get semester info'''
     resp = ids.get(f'{host}/eams/stdElectCourse!defaultPage.action',
-                   params={'electionProfile.id': election_id},
+                   params={'electionProfile.id': e_id},
                    headers=headers)
     if resp.status_code != 200:
         raise Exception('Failed to get semester info.')
@@ -77,23 +80,32 @@ def get_courses_status(params: dict) -> dict:
                    headers=headers)
     if resp.status_code != 200:
         raise Exception('Failed to get course status.')
-    data = resp.text  # format: javascript code
-    data = data[data.find('{'):data.rfind('}') + 1]  # js object
-    return json.loads(_jsonnet.evaluate_snippet('snippet', data))
+    dat = resp.text  # format: javascript code
+    dat = dat[dat.find('{'):dat.rfind('}') + 1]  # js object
+    return json.loads(_jsonnet.evaluate_snippet('snippet', dat))
 
 
-def elect_course(course_id: str, election_id: str) -> list:
+def head_election(e_id: str):
+    ids.head(f'{host}/eams/stdElectCourse!innerIndex.action?projectId=1',
+             headers=headers)
+    ids.head(f'{host}/eams/stdElectCourse!defaultPage.action',
+             params={'electionProfile.id': e_id},
+             headers=headers)
+
+
+def elect_course(course_id: str, e_id: str) -> list:
     '''Elect a course
     return: [course_id, message, succeeded?, retry?]
     '''
     headers['X-Requested-With'] = 'XMLHttpRequest'
     resp = ids.post(f'{host}/eams/stdElectCourse!batchOperator.action',
-                    params={'profileId': election_id},
+                    params={'profileId': e_id},
                     headers=headers,
                     data={
                         'optype': 'true',
                         'operator0': f'{course_id}:true:0'
-                    })
+                    },
+                    allow_redirects=False)
 
     if '会话已经被过期' in resp.text:
         ids.login(username, password, service)
@@ -124,43 +136,66 @@ def elect_course(course_id: str, election_id: str) -> list:
     return [course_id, msg, succeeded, retry]
 
 
-def parse_courses_exp(exp: str, election_id: str) -> list:
+def parse_courses_exp(exp: str, e_id: str) -> list:
     if ';' in exp:
-        return [parse_courses_exp(i, election_id) for i in exp.split(';')]
+        return [parse_courses_exp(i, e_id) for i in exp.split(';')]
     if '|' in exp:
         for i in exp.split('|'):
-            expr, msg, succeeded, retry = parse_courses_exp(i, election_id)
+            expr, msg, succeeded, retry = parse_courses_exp(i, e_id)
             if succeeded:
-                return expr, msg, succeeded, retry
-        return exp, msg, succeeded, retry
+                return [expr, msg, succeeded, retry]
+        return [exp, msg, succeeded, retry]
     if '&' in exp:
         for i in exp.split('&'):
-            expr, msg, succeeded, retry = parse_courses_exp(i, election_id)
+            expr, msg, succeeded, retry = parse_courses_exp(i, e_id)
             if not succeeded:
-                return expr, msg, succeeded, retry
-        return exp, msg, succeeded, retry
+                return [expr, msg, succeeded, retry]
+        return [exp, msg, succeeded, retry]
 
     retry = True
     while retry:
-        expr, msg, succeeded, retry = elect_course(exp, election_id)
+        expr, msg, succeeded, retry = elect_course(exp, e_id)
         print(f'{expr}: {msg} (succeeded:{succeeded}, retry:{retry})')
         sleep(interval)
-    return elect_course(exp, election_id)
+    return elect_course(exp, e_id)
+
+
+def thread_elect_courses_exps(exps: list[str], e_id: str):
+    head_election(e_id)
+
+    if len(exps) == 0:
+        print('Please input the courses expressions you want to elect, '
+              'end with an empty line.')
+        while True:
+            exp = input('Courses expression: ')
+            if exp == '':
+                break
+            exps.append(exp)
+
+    threads = []
+    for exp in exps:
+        exp = exp.strip().replace(' ', '')
+        exp = exp.replace('&&', '&').replace('||', '|')
+
+        t = threading.Thread(target=parse_courses_exp, args=(exp, e_id))
+        threads.append(t)
+        t.start()
+        sleep(threads_interval)
+
+    for t in threads:
+        t.join()
 
 
 if __name__ == '__main__':
     ids = IdsAuth()
-    service = 'http://jw.shiep.edu.cn/eams/login.action'
 
     if os.path.exists('cookies.json'):
         with open('cookies.json', 'r') as f:
             cookies = json.load(f)
         ids = IdsAuth(cookies)
-
     if not ids.ok:
         print('Logging in by username and password...')
         ids.login(username, password, service)
-
     if ids.ok:
         with open('cookies.json', 'w') as f:
             json.dump(ids.cookies, f)
@@ -169,10 +204,15 @@ if __name__ == '__main__':
         print('Login failed.')
         exit(1)
 
+    if len(default_courses_exps) > 0:
+        for election_id, courses_exps in default_courses_exps.items():
+            thread_elect_courses_exps(courses_exps, election_id)
+        exit(0)
+
     elections = get_elections()
     print('Available elections: ')
-    for name, id in elections.items():
-        print(f'  {name}: {id}')
+    for name, election_id in elections.items():
+        print(f'  {name}: {election_id}')
 
     if len(elections) == 0:
         print('No available elections.')
@@ -180,78 +220,45 @@ if __name__ == '__main__':
     elif len(elections) == 1:
         election_id = list(elections.values())[0]
     else:
-        if default_election_id in elections.values():
-            election_id = default_election_id
-        else:
-            election_id = input('Please select an election id: ')
+        election_id = input('Please select an election id: ')
     print(f'Selected {election_id}.')
 
-    ids.get('https://jw.shiep.edu.cn/eams/stdElectCourse!defaultPage.action',
-            params={'electionProfile.id': election_id},
-            headers=headers)  # Do not remove this
+    head_election(election_id)
 
-    if not skip_course_list:
-        data = get_courses(election_id)
+    if skip_course_list:
+        thread_elect_courses_exps([], election_id)
+        exit(0)
 
-        if check_course_availability:
-            params = get_semester_info(election_id)
-            courses_status = get_courses_status(params)
-            for course in data:
-                course['available'] = (courses_status[str(course['id'])]['sc']
-                                       < courses_status[str(
-                                           course['id'])]['lc'])
+    data = get_courses(election_id)
 
-        if sheet_format == 'tsv':
-            df = pd.DataFrame(data)
-            filename = f'{election_id}.tsv'
-            df.to_csv(filename, sep='\t', index=False)
-        elif sheet_format == 'xlsx':
-            df = pd.DataFrame(data)
-            filename = f'{election_id}.xlsx'
-            df.to_excel(filename, index=False)
-        else:
-            filename = ''
-
-        if check_course_availability:
-            data.sort(key=lambda x: (not x['available'], x['id']))
-        else:
-            data.sort(key=lambda x: x['id'])
-
-        print(f'Please checkout full information on website' +
-              '.' if filename == '' else f' or in {filename}.')
-        print('Courses: ')
-        column_names = ['ID:', 'No.', 'Name', 'Teachers']
-        column_keys = ['id', 'no', 'name', 'teachers']
-        if check_course_availability:
-            column_names.append('Available')
-            column_keys.append('available')
-
-        print('  ' + '\t'.join(column_names))
+    if check_course_availability:
+        courses_status = get_courses_status(get_semester_info(election_id))
         for course in data:
-            print('  ' + '\t'.join([str(course[key]) for key in column_keys]))
+            course['available'] = (courses_status[str(course['id'])]['sc']
+                                   < courses_status[str(course['id'])]['lc'])
 
-    if len(default_courses_exps) == 0:
-        print('Please input the courses expressions you want to elect, '
-              'end with an empty line.')
-        courses_exps = []
-        while True:
-            courses_exp = input('Courses expression: ')
-            if courses_exp == '':
-                break
-            courses_exps.append(courses_exp)
+        data.sort(key=lambda x: (not x['available'], x['id']))
     else:
-        courses_exps = default_courses_exps
+        data.sort(key=lambda x: x['id'])
 
-    threads = []
-    for courses_exp in courses_exps:
-        courses_exp = courses_exp.strip().replace(' ', '')
-        courses_exp = courses_exp.replace('&&', '&').replace('||', '|')
+    if sheet_format not in ['tsv', 'xlsx']:
+        sheet_format = ''
+    else:
+        df = pd.DataFrame(data)
+        if sheet_format == 'tsv':
+            df.to_csv(f'{election_id}.tsv', sep='\t', index=False)
+        elif sheet_format == 'xlsx':
+            df.to_excel(f'{election_id}.xlsx', index=False)
+    print(f'Please checkout full information on website' +
+          (' or in the file.' if sheet_format else '.'))
 
-        t = threading.Thread(target=parse_courses_exp,
-                             args=(courses_exp, election_id))
-        threads.append(t)
-        t.start()
-        sleep(threads_interval)
+    print('Courses: ')
+    column_keys = ['id', 'no', 'name', 'teachers']
+    if check_course_availability:
+        column_keys.append('available')
 
-    for t in threads:
-        t.join()
+    print('  ' + '\t'.join(column_keys))
+    for course in data:
+        print('  ' + '\t'.join([str(course[key]) for key in column_keys]))
+
+    thread_elect_courses_exps([], election_id)

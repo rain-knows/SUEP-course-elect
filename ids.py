@@ -56,3 +56,6 @@ class IdsAuth:
 
     def post(self, url: str, **kwargs):
         return self.s.post(url, verify=self.rVerify, **kwargs)
+
+    def head(self, url: str, **kwargs):
+        return self.s.head(url, verify=self.rVerify, **kwargs)

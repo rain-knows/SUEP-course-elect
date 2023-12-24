@@ -18,6 +18,7 @@ class IdsAuth:
     def __init__(self, cookies=None):
         if cookies:
             self.s.cookies = requests.utils.cookiejar_from_dict(cookies)
+            self.cookies = self.s.cookies.get_dict()
             self.check()
 
     def login(self, username: str, password: str, service: str):

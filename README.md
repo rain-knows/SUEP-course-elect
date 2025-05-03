@@ -22,6 +22,22 @@ docker build -t suep-course-elect .
 docker run -it suep-course-elect
 ```
 
+### GUI Interface
+
+A graphical user interface (GUI) has been added to the script. You can use the GUI to perform all the operations that were previously done through the command line.
+
+To run the GUI, use the following command:
+
+```bash
+python gui.py
+```
+
+The GUI provides the following functionalities:
+- Login
+- Select Courses
+- View Courses List
+- Export Courses List
+
 ## Configuration
 
 | Variable                  | Description                                                                |

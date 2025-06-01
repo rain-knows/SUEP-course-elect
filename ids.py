@@ -13,13 +13,16 @@ class IdsAuth:
         'Chrome/106.0.0.0 Safari/537.36',
     }
     s = requests.Session()
-    rVerify = True  # or 'mitm.pem'
+    rVerify = False  # 修改为False以禁用SSL证书验证
 
     def __init__(self, cookies=None):
         if cookies:
             self.s.cookies = requests.utils.cookiejar_from_dict(cookies)
             self.cookies = self.s.cookies.get_dict()
             self.check()
+        # 禁用SSL验证警告
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def login(self, username: str, password: str, service: str):
         url = 'https://ids.shiep.edu.cn/authserver/login'

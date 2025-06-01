@@ -19,3 +19,4 @@ services:
     environment:
       - HTTP_PROXY=http://easyconnect:8888
       - HTTPS_PROXY=http://easyconnect:8888
+    command: python3 gui.py
